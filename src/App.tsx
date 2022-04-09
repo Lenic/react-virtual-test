@@ -31,10 +31,7 @@ function App() {
     []
   );
 
-  const { loading, loadingRef, error, data, more, fetchNext } = useInfiniteQuery(
-    handleFetchList,
-    handleGetNextPageArgs
-  );
+  const { loading, error, data, more, fetchNext } = useInfiniteQuery(handleFetchList, handleGetNextPageArgs);
 
   const flatPosts = useMemo(() => (data ? data.map((v) => v.data).flat(1) : []), [data]);
 
@@ -42,13 +39,8 @@ function App() {
 
   const handleCalcHeight = useCallback(() => 100, []);
   const virtualConfig = useMemo(
-    () => ({
-      size: flatPosts.length,
-      parentRef,
-      estimateSize: handleCalcHeight,
-      paddingEnd: more ? 22 : 0,
-    }),
-    [flatPosts.length, handleCalcHeight, more]
+    () => ({ size: flatPosts.length, parentRef, estimateSize: handleCalcHeight }),
+    [flatPosts.length, handleCalcHeight]
   );
   const { virtualItems, totalSize } = useVirtual(virtualConfig);
 
@@ -70,6 +62,7 @@ function App() {
     return memoizeOne(action);
   }, []);
 
+  const prevRatioRef = useRef<number>(0);
   const loadingComponentRef = useRef<HTMLDivElement | null>(null);
   const [scrollContainer, loadingElement] = [parentRef.current, loadingComponentRef.current];
   useEffect(() => {
@@ -79,48 +72,45 @@ function App() {
       (list) => {
         const [target] = list;
         if (!target) return;
-        if (target.time < 1000) return;
 
-        if (!loadingRef.current) {
-          fetchNext();
+        const previousRatio = prevRatioRef.current;
+        prevRatioRef.current = target.intersectionRatio;
+        if (previousRatio >= target.intersectionRatio) {
+          return;
         }
+
+        console.log('target', target);
+
+        fetchNext();
       },
       { root: scrollContainer, rootMargin: '0px 0px 100px 0px' }
     );
     observer.observe(loadingElement);
 
     return () => observer.disconnect();
-  }, [fetchNext, loadingElement, loadingRef, scrollContainer]);
-
-  if (loading) {
-    return <div>Loading...</div>;
-  }
-
-  if (error) {
-    return <div>Error: {error}</div>;
-  }
+  }, [fetchNext, loadingElement, scrollContainer]);
 
   return (
-    <>
-      <div ref={parentRef} className="List" style={containerStyle}>
-        <div style={scrollHolder}>
-          {virtualItems.map((virtualRow) => (
-            <div
-              key={virtualRow.index}
-              className={virtualRow.index % 2 ? 'ListItemOdd' : 'ListItemEven'}
-              style={handleFillItemStyle(virtualRow.size, virtualRow.start)}
-            >
-              {flatPosts[virtualRow.index]}
-            </div>
-          ))}
-        </div>
-        {!more ? null : (
-          <div className="Loading" ref={loadingComponentRef}>
-            I'm loading holder.
+    <div ref={parentRef} className="List" style={containerStyle}>
+      {!loading ? null : <div>Loading...</div>}
+      {!error ? null : <div>Error: {error}</div>}
+      <div style={scrollHolder}>
+        {virtualItems.map((virtualRow) => (
+          <div
+            key={virtualRow.index}
+            className={virtualRow.index % 2 ? 'ListItemOdd' : 'ListItemEven'}
+            style={handleFillItemStyle(virtualRow.size, virtualRow.start)}
+          >
+            {flatPosts[virtualRow.index]}
           </div>
-        )}
+        ))}
       </div>
-    </>
+      {!more ? null : (
+        <div className="Loading" ref={loadingComponentRef}>
+          I'm loading holder.
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,0 +1,47 @@
+#!/bin/bash
+# set -x
+# 1. 首先需要安装一个全局 Node 第三方包，用于文件夹监视
+#      npm i -g chokidar-cli --registry=http://registry.npm.taobao.org
+# 2. 设置一个环境变量 NODE_PORT，提供给下面的命令使用
+#    这个变量是远程到服务器的 SSH 端口号，根据使用的 Shell 不同，执行命令
+#    bash:
+#      echo 'export DEV_IP=168' >> ~/.bashrc
+#    zsh:
+#      echo 'export DEV_IP=168' >> ~/.zshrc
+# 3. 关闭终端窗口再打开就可以正常运行了
+#
+# 注意：如果提示 ./sync 不能运行需要添加权限
+#   chmod +x ./sync
+IP=$1
+NAME=${PWD##*/}
+if [ -z  $IP ]; then
+    IP=$DEV_IP
+fi
+if [ -z $IP ]; then
+    echo '必须输入目标 IP 或者使用 DEV_IP 的环境变量！'
+    exit
+fi
+
+syncfile() {
+    # echo 'syncfile-IP' $IP
+    rsync -azqh \
+      -e 'ssh -p 10099' \
+      --no-perms \
+      --delete \
+      --progress \
+      --exclude=node_modules/ \
+      --exclude=.git/ \
+      --exclude=.idea/ \
+      --exclude=sync \
+      --exclude=.DS_Store \
+      `pwd`/ root@192.168.31.$IP:/root/workspace/$NAME-rsync
+}
+filename=$2
+if [ -z "$filename" ]; then
+  syncfile ''
+  echo -e "transfer $IP \033[0;32msuccess\033[0m: \033[0;33mall\033[0m" "\033[0;35m$(date "+%H:%M:%S")\033[0m"
+  chokidar "**/*" --silent -c "$0 $IP {path}"
+else
+  syncfile $IP $filename
+  echo -e "transfer $IP \033[0;32msuccess\033[0m:" "\033[0;33m$filename\033[0m" "\033[0;35m$(date "+%H:%M:%S")\033[0m"
+fi
