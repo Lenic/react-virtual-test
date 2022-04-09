@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 
 import type { FetchListResult, GroupList } from './utils';
 
+import Deferred from '@lenic/deferred';
 import memoizeOne from 'memoize-one';
 import { useVirtual } from 'react-virtual';
 import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from 'react';
@@ -20,7 +21,7 @@ const containerStyle: CSSProperties = {
 function App() {
   const handleFetchList = useCallback(async (nextPage: number) => {
     console.log('handleFetchList', nextPage);
-    const { data } = await getDataAsync(`https://demoapi.com?_limit=10&_page=${nextPage}`);
+    const { data } = await getDataAsync(`https://demoapi.com?_limit=60&_page=${nextPage}`);
     return {
       more: nextPage < 100,
       data: { data, parameter: nextPage },
@@ -28,7 +29,7 @@ function App() {
   }, []);
 
   const handleGetNextPageArgs = useCallback(
-    (lastGroup?: GroupList<string, number>) => (lastGroup ? lastGroup.parameter + 10 : 0),
+    (lastGroup?: GroupList<string, number>) => (lastGroup ? lastGroup.parameter + 60 : 0),
     []
   );
 
@@ -38,24 +39,76 @@ function App() {
 
   const parentRef = useRef<HTMLDivElement | null>(null);
 
+  const handleCalcHeight = useCallback(() => 100, []);
   const [columnCount, setColumnCount] = useState(getColumnCount);
+  const scrollToFn: (offset: number, defaultScrollToFn?: (offset: number) => void) => void = useCallback(
+    (offset, defaultScrollTo) => {
+      console.log('scrollTo', offset);
+      defaultScrollTo?.(offset);
+    },
+    []
+  );
+  const virtualConfig = useMemo(
+    () => ({
+      size: Math.ceil(flatPosts.length / columnCount),
+      parentRef,
+      estimateSize: handleCalcHeight,
+      scrollToFn,
+      overscan: 0,
+    }),
+    [columnCount, flatPosts.length, handleCalcHeight, scrollToFn]
+  );
+  const { virtualItems, totalSize, scrollToIndex } = useVirtual(virtualConfig);
+
+  const leftTopIndexRef = useRef(0);
+  useEffect(() => {
+    leftTopIndexRef.current = virtualItems.length ? virtualItems[0].index : 0;
+
+    console.log('top index', leftTopIndexRef.current);
+  }, [virtualItems]);
+
+  const deferRef = useRef<Deferred<Action>>();
+  const cachedLeftTopIndexRef = useRef(-1);
+  useEffect(() => {
+    if (cachedLeftTopIndexRef.current !== -1 && deferRef.current) {
+      deferRef.current.resolve(() => {
+        console.log('set left top', cachedLeftTopIndexRef.current);
+        scrollToIndex(cachedLeftTopIndexRef.current, { align: 'start' });
+        cachedLeftTopIndexRef.current = -1;
+      });
+    }
+  });
+
   useEffect(() => {
     const observer = new ResizeObserver(([target]) => {
       if (!target) return;
 
-      setColumnCount(getColumnCount(target.contentRect.width));
+      setColumnCount((previousColumnCount) => {
+        const currentColumnCount = getColumnCount(target.contentRect.width);
+
+        if (previousColumnCount !== currentColumnCount) {
+          const defer = new Deferred<Action>();
+          defer.promise.then((action) => {
+            deferRef.current = void 0;
+
+            action();
+          });
+          deferRef.current = defer;
+
+          if (cachedLeftTopIndexRef.current === -1) {
+            const leftTopIndexForNow = previousColumnCount * leftTopIndexRef.current;
+            const leftTopIndexForNextOnlyColumnOne = Math.floor(leftTopIndexForNow / currentColumnCount);
+            cachedLeftTopIndexRef.current = leftTopIndexForNextOnlyColumnOne;
+          }
+        }
+
+        return currentColumnCount;
+      });
     });
     observer.observe(document.body);
 
     return () => observer.disconnect();
   }, []);
-
-  const handleCalcHeight = useCallback(() => 100, []);
-  const virtualConfig = useMemo(
-    () => ({ size: Math.ceil(flatPosts.length / columnCount), parentRef, estimateSize: handleCalcHeight }),
-    [columnCount, flatPosts.length, handleCalcHeight]
-  );
-  const { virtualItems, totalSize } = useVirtual(virtualConfig);
 
   const scrollHolder: CSSProperties = useMemo(
     () => ({ height: `${totalSize}px`, width: '100%', position: 'relative' }),
@@ -86,13 +139,14 @@ function App() {
       ([target]) => {
         if (!target) return;
 
+        /**
+         * 只有向上滚动时才触发获取更多数据
+         */
         const previousRatio = prevRatioRef.current;
         prevRatioRef.current = target.intersectionRatio;
         if (previousRatio >= target.intersectionRatio) {
           return;
         }
-
-        console.log('target', target);
 
         fetchNext();
       },
@@ -124,17 +178,30 @@ function App() {
     [columnCount, flatPosts, handleFillItemStyle]
   );
 
+  const inputRef = useRef<HTMLInputElement | null>(null);
   return (
-    <div ref={parentRef} className="List" style={containerStyle}>
-      {!loading ? null : <div>Loading...</div>}
-      {!error ? null : <div>Error: {error}</div>}
-      <div style={scrollHolder}>{virtualItems.map(handleRenderItem)}</div>
-      {!more ? null : (
-        <div className="Loading" ref={loadingComponentRef}>
-          I'm loading holder.
-        </div>
-      )}
-    </div>
+    <>
+      <input name="" type="text" ref={inputRef} />
+      <button
+        onClick={() => {
+          const index = parseInt(inputRef.current?.value || '0', 10);
+          debugger;
+          scrollToIndex(index, { align: 'start' });
+        }}
+      >
+        scrollToIndex
+      </button>
+      <div ref={parentRef} className="List" style={containerStyle}>
+        {!loading ? null : <div>Loading...</div>}
+        {!error ? null : <div>Error: {error}</div>}
+        <div style={scrollHolder}>{virtualItems.map(handleRenderItem)}</div>
+        {!more ? null : (
+          <div className="Loading" ref={loadingComponentRef}>
+            I'm loading holder.
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
