@@ -1,14 +1,15 @@
-import type { CSSProperties } from 'react';
+import type { VirtualItem } from 'react-virtual';
+import type { CSSProperties, ReactNode } from 'react';
 
 import type { FetchListResult, GroupList } from './utils';
 
 import memoizeOne from 'memoize-one';
 import { useVirtual } from 'react-virtual';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 
 import './App.css';
 
-import { useInfiniteQuery, getDataAsync } from './utils';
+import { useInfiniteQuery, getDataAsync, getColumnCount } from './utils';
 
 const containerStyle: CSSProperties = {
   height: `500px`,
@@ -37,10 +38,22 @@ function App() {
 
   const parentRef = useRef<HTMLDivElement | null>(null);
 
+  const [columnCount, setColumnCount] = useState(getColumnCount);
+  useEffect(() => {
+    const observer = new ResizeObserver(([target]) => {
+      if (!target) return;
+
+      setColumnCount(getColumnCount(target.contentRect.width));
+    });
+    observer.observe(document.body);
+
+    return () => observer.disconnect();
+  }, []);
+
   const handleCalcHeight = useCallback(() => 100, []);
   const virtualConfig = useMemo(
-    () => ({ size: flatPosts.length, parentRef, estimateSize: handleCalcHeight }),
-    [flatPosts.length, handleCalcHeight]
+    () => ({ size: Math.ceil(flatPosts.length / columnCount), parentRef, estimateSize: handleCalcHeight }),
+    [columnCount, flatPosts.length, handleCalcHeight]
   );
   const { virtualItems, totalSize } = useVirtual(virtualConfig);
 
@@ -50,17 +63,18 @@ function App() {
   );
 
   const handleFillItemStyle = useMemo(() => {
-    const action: Func<CSSProperties, [size: number, start: number]> = (size, start) => ({
+    const width = 100 / columnCount;
+    const action: Func<CSSProperties, [size: number, start: number, index: number]> = (size, start, index) => ({
       position: 'absolute',
       top: 0,
       left: 0,
-      width: '100%',
+      width: `${width}%`,
       height: `${size}px`,
-      transform: `translate3d(0px, ${start}px, 0px)`,
+      transform: `translate3d(${100 * index}%, ${start}px, 0px)`,
     });
 
     return memoizeOne(action);
-  }, []);
+  }, [columnCount]);
 
   const prevRatioRef = useRef<number>(0);
   const loadingComponentRef = useRef<HTMLDivElement | null>(null);
@@ -69,8 +83,7 @@ function App() {
     if (!scrollContainer || !loadingElement) return;
 
     const observer = new IntersectionObserver(
-      (list) => {
-        const [target] = list;
+      ([target]) => {
         if (!target) return;
 
         const previousRatio = prevRatioRef.current;
@@ -90,21 +103,32 @@ function App() {
     return () => observer.disconnect();
   }, [fetchNext, loadingElement, scrollContainer]);
 
+  const handleRenderItem = useCallback(
+    ({ index, size, start }: VirtualItem) => {
+      const resultList: ReactNode[] = [];
+
+      for (let i = 0; i < columnCount; i++) {
+        resultList.push(
+          <div
+            key={`row-${index}-${i}`}
+            className={index % 2 ? 'ListItemOdd' : 'ListItemEven'}
+            style={handleFillItemStyle(size, start, i)}
+          >
+            {flatPosts[index * columnCount + i]}
+          </div>
+        );
+      }
+
+      return <Fragment key={`row-${index}`}>{resultList}</Fragment>;
+    },
+    [columnCount, flatPosts, handleFillItemStyle]
+  );
+
   return (
     <div ref={parentRef} className="List" style={containerStyle}>
       {!loading ? null : <div>Loading...</div>}
       {!error ? null : <div>Error: {error}</div>}
-      <div style={scrollHolder}>
-        {virtualItems.map((virtualRow) => (
-          <div
-            key={virtualRow.index}
-            className={virtualRow.index % 2 ? 'ListItemOdd' : 'ListItemEven'}
-            style={handleFillItemStyle(virtualRow.size, virtualRow.start)}
-          >
-            {flatPosts[virtualRow.index]}
-          </div>
-        ))}
-      </div>
+      <div style={scrollHolder}>{virtualItems.map(handleRenderItem)}</div>
       {!more ? null : (
         <div className="Loading" ref={loadingComponentRef}>
           I'm loading holder.

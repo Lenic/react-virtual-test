@@ -202,3 +202,20 @@ export const useInfiniteQuery = <TData extends any, TQueryParameter extends any>
     fetchNext: handleFetchNext,
   };
 };
+
+export const getColumnCount = (width?: number) => {
+  let currentWidth = width;
+  if (!currentWidth) {
+    currentWidth = window.innerWidth;
+  }
+
+  if (currentWidth <= 300) return 1;
+
+  if (currentWidth <= 500) return 2;
+
+  if (currentWidth <= 700) return 3;
+
+  if (currentWidth <= 900) return 4;
+
+  return 5;
+};
